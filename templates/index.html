@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Editable Fields</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <div class="wrap">
+
+    <div class="lock-bar">
+      {% if logged_in %}
+        <label class="switch">
+          <input type="checkbox" id="editToggle">
+          <span class="slider"></span>
+        </label>
+        <span id="editLabel">Edit: OFF</span>
+        <span class="user-tag">{{ username }}</span>
+        <button id="changePwBtn" class="link-btn" style="display:none;">Account</button>
+        <a href="{{ url_for('logout') }}" class="link-btn">Logout</a>
+      {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-accent">Login to edit</a>
+      {% endif %}
+    </div>
+
+    {% if logged_in %}
+    <div id="pwPanel" class="pw-panel" style="display:none;">
+      <input id="newUsername" type="text" placeholder="New username (optional)">
+      <input id="currentPw" type="password" placeholder="Current password">
+      <input id="newPw" type="password" placeholder="New password (optional, min 4 chars)">
+      <div class="pw-panel-actions">
+        <button id="pwSubmitBtn" class="btn btn-accent">Update account</button>
+        <button id="pwCancelBtn" class="btn btn-outline">Cancel</button>
+      </div>
+      <div id="pwMessage" class="pw-message"></div>
+    </div>
+
+    <div class="toolbar">
+      <button id="clearAllBtn" class="btn btn-outline" disabled>Clear all</button>
+      <button id="addRowBtn" class="btn btn-accent" disabled>+ Row</button>
+      <button id="saveBtn" class="btn btn-save" style="display:none;">Save</button>
+    </div>
+    {% endif %}
+
+    <div id="fieldList" class="field-list">
+      {% for f in fields %}
+      <div class="field-row" data-id="{{ f['id'] }}">
+        <div class="field-row-top">
+          <input class="label-input" type="text" value="{{ f['label'] }}" placeholder="Field name" readonly>
+          {% if logged_in %}<button class="remove-btn" title="Remove field" disabled>&times;</button>{% endif %}
+        </div>
+        <input class="value-input" type="text" value="{{ f['value'] }}" placeholder="&mdash;" readonly>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if logged_in %}
+    <button id="addRowBottom" class="add-row-dashed" disabled>+ Add row</button>
+    {% endif %}
+  </div>
+
+  {% if logged_in %}
+  <template id="rowTemplate">
+    <div class="field-row" data-id="">
+      <div class="field-row-top">
+        <input class="label-input" type="text" value="New field" placeholder="Field name">
+        <button class="remove-btn" title="Remove field">&times;</button>
+      </div>
+      <input class="value-input" type="text" value="" placeholder="&mdash;">
+    </div>
+  </template>
+
+<script>
+const fieldList = document.getElementById('fieldList');
+const rowTemplate = document.getElementById('rowTemplate');
+const toggle = document.getElementById('editToggle');
+const editLabel = document.getElementById('editLabel');
+const changePwBtn = document.getElementById('changePwBtn');
+const pwPanel = document.getElementById('pwPanel');
+const clearAllBtn = document.getElementById('clearAllBtn');
+const addRowBtn = document.getElementById('addRowBtn');
+const addRowBottom = document.getElementById('addRowBottom');
+const saveBtn = document.getElementById('saveBtn');
+
+let editing = false;
+
+function setRowEditable(row, on) {
+  row.querySelector('.label-input').readOnly = !on;
+  row.querySelector('.value-input').readOnly = !on;
+  const rm = row.querySelector('.remove-btn');
+  if (rm) rm.disabled = !on;
+}
+
+function applyEditState() {
+  document.querySelectorAll('.field-row').forEach(row => setRowEditable(row, editing));
+  clearAllBtn.disabled = !editing;
+  addRowBtn.disabled = !editing;
+  addRowBottom.disabled = !editing;
+  changePwBtn.style.display = editing ? 'inline-block' : 'none';
+  saveBtn.style.display = editing ? 'inline-block' : 'none';
+  editLabel.textContent = editing ? 'Edit: ON' : 'Edit: OFF';
+  if (!editing) pwPanel.style.display = 'none';
+}
+
+toggle.addEventListener('change', () => {
+  editing = toggle.checked;
+  applyEditState();
+});
+
+changePwBtn.addEventListener('click', () => {
+  pwPanel.style.display = pwPanel.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('pwMessage').textContent = '';
+});
+
+document.getElementById('pwCancelBtn').addEventListener('click', () => {
+  pwPanel.style.display = 'none';
+});
+
+document.getElementById('pwSubmitBtn').addEventListener('click', async () => {
+  const newUsername = document.getElementById('newUsername').value;
+  const current = document.getElementById('currentPw').value;
+  const newPw = document.getElementById('newPw').value;
+  const msg = document.getElementById('pwMessage');
+
+  const res = await fetch('/api/update_account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ new_username: newUsername, current_password: current, new_password: newPw })
+  });
+  const result = await res.json();
+
+  if (result.status === 'ok') {
+    msg.textContent = 'Account updated.';
+    msg.className = 'pw-message success';
+    document.getElementById('currentPw').value = '';
+    document.getElementById('newPw').value = '';
+  } else {
+    msg.textContent = result.message || 'Could not update account.';
+    msg.className = 'pw-message error';
+  }
+});
+
+function wireRow(row) {
+  const removeBtn = row.querySelector('.remove-btn');
+  removeBtn.addEventListener('click', async () => {
+    const id = row.dataset.id;
+    row.style.opacity = '0.4';
+    if (id) {
+      await fetch('/api/delete_field', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id })
+      });
+    }
+    row.remove();
+  });
+}
+
+document.querySelectorAll('.field-row').forEach(wireRow);
+
+async function addRow() {
+  const res = await fetch('/api/add_field', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: 'New field' })
+  });
+  const result = await res.json();
+
+  const clone = rowTemplate.content.cloneNode(true);
+  const row = clone.querySelector('.field-row');
+  row.dataset.id = result.id;
+  fieldList.appendChild(row);
+  wireRow(row);
+  setRowEditable(row, editing);
+  row.querySelector('.label-input').focus();
+  row.querySelector('.label-input').select();
+}
+
+addRowBtn.addEventListener('click', addRow);
+addRowBottom.addEventListener('click', addRow);
+
+clearAllBtn.addEventListener('click', async () => {
+  if (!confirm('Clear all fields?')) return;
+  await fetch('/api/clear_all', { method: 'POST' });
+  fieldList.innerHTML = '';
+});
+
+saveBtn.addEventListener('click', async () => {
+  const rows = [];
+  document.querySelectorAll('.field-row').forEach(row => {
+    const id = row.dataset.id;
+    if (!id) return;
+    rows.push({
+      id: id,
+      label: row.querySelector('.label-input').value,
+      value: row.querySelector('.value-input').value
+    });
+  });
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+
+  try {
+    const res = await fetch('/api/save_all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: rows })
+    });
+    const result = await res.json();
+    saveBtn.textContent = result.status === 'ok' ? 'Saved \u2713' : 'Error';
+  } catch (err) {
+    saveBtn.textContent = 'Error';
+  }
+
+  saveBtn.disabled = false;
+  setTimeout(() => { saveBtn.textContent = 'Save'; }, 1500);
+});
+</script>
+  {% endif %}
+
+</body>
+</html>
